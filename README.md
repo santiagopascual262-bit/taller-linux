@@ -41,12 +41,15 @@ taller-linux/
 ├── playbooks/
 │   ├── hardening.yaml           # Hardening inicial de Ubuntu (UFW + fail2ban)
 │   ├── basededatos3.yaml        # Versión final (idempotente, vault, tasks/)
+│   ├── backup_mariadb.yaml      # Backup automático diario de MariaDB
 │   └── servidorweb3.yaml        # Instalación y configuración del servidor web
 │   └── site.yaml                # Playbook integrador
 ├── tasks/
 │   └── initialize_root.yaml     # Tarea reutilizable: fija password root de MariaDB
 ├── templates/
 │   └── cumple.j2                # Plantilla PHP de la app (index.php)
+│   ├── backup_mysql.sh.j2       # Script de backup de MariaDB
+│   └── my_backup.cnf.j2         # Credenciales para mysqldump (permisos 0600)
 ├── vars/
 │   └── database.yaml            # Variables de la BD, cifradas con Ansible Vault
 ├── OBLIGATORIO.md               # Consigna del obligatorio
@@ -149,7 +152,29 @@ Se aplica sobre el grupo `centos` (`centos01`, `centos02`), también usando `var
 ```bash
 ansible-playbook -i inventory/hosts.ini playbooks/servidorweb3.yaml --ask-vault-pass --ask-become-pass
 ```
-### 4. `playbooks/site.yaml` - Playbook integrador
+### 4. `playbooks/backup_mariadb.yaml` — Backup automático de MariaDB
+
+Se aplica sobre el grupo `database` (host `ubuntu-db`). Usa las variables cifradas de `vars/database.yaml` (concretamente `DB_ROOT_PW` y `DB_DBASE`):
+
+1. Crea el directorio `/var/backups/mariadb` (permisos `0700`, solo accesible por `root`).
+2. Despliega `/root/.my_backup.cnf` (permisos `0600`), un archivo de credenciales de MySQL con el usuario y password de `root`, para que `mysqldump` no necesite recibir la contraseña como argumento (evita exponerla en `ps aux`).
+3. Despliega el script `/usr/local/bin/backup_mysql.sh`, que ejecuta `mysqldump` usando `--defaults-extra-file` contra el archivo de credenciales, y borra automáticamente los backups con más de `backup_retention_days` (7 por defecto) días de antigüedad.
+4. Programa el script vía `cron` para correr todos los días a las 2 AM, con salida redirigida a `/var/log/backup_mysql.log`.
+
+```bash
+ansible-playbook -i inventory/hosts.ini playbooks/backup_mariadb.yaml --ask-vault-pass --ask-become-pass
+```
+
+**Verificación manual (sin esperar al cron):**
+
+```bash
+sudo /usr/local/bin/backup_mysql.sh
+sudo ls -la /var/backups/mariadb/
+```
+
+> ⚠️ Los backups se guardan en el mismo disco que la base de datos original (`/var/backups/mariadb`, en el mismo filesystem que `/var/lib/mysql`). Esto protege contra errores humanos o corrupción de datos, pero **no** contra una falla del disco físico — para eso haría falta copiar los backups a otro host o almacenamiento externo.
+
+### 5. `playbooks/site.yaml` - Playbook integrador
 
 Ejecuta en orden los playbooks (Hardening, basededatos3 y servidorweb)
 
