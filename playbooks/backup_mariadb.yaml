@@ -1,0 +1,43 @@
+---
+- name: Backup automatico de MariaDB
+  hosts: database
+  become: true
+  vars_files:
+    - ../vars/database.yaml
+  vars:
+    backup_dir: /var/backups/mariadb
+    backup_retention_days: 7
+
+  tasks:
+    - name: Crear directorio de backups
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Desplegar archivo de credenciales para backup
+      ansible.builtin.template:
+        src: ../templates/my_backup.cnf.j2
+        dest: /root/.my_backup.cnf
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Desplegar script de backup
+      ansible.builtin.template:
+        src: ../templates/backup_mysql.sh.j2
+        dest: /usr/local/bin/backup_mysql.sh
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Programar backup diario con cron
+      ansible.builtin.cron:
+        name: "Backup diario de MariaDB (cumples)"
+        minute: "0"
+        hour: "2"
+        job: "/usr/local/bin/backup_mysql.sh >> /var/log/backup_mysql.log 2>&1"
+        user: root
+
